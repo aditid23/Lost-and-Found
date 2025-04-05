@@ -1,55 +1,36 @@
-import User from '../models/User.js';
-import nodemailer from 'nodemailer';
-import jwt from 'jsonwebtoken';
+// This is a temporary in-memory OTP store for testing purposes
+const otpStore = {};
 
-const generateOTP = () => Math.floor(100000 + Math.random() * 900000).toString();
-
-const transporter = nodemailer.createTransport({
-  service: 'gmail',
-  auth: {
-    user: process.env.EMAIL_USER,
-    pass: process.env.EMAIL_PASS
-  }
-});
-
-export const sendOTP = async (req, res) => {
+export const sendOtp = (req, res) => {
   const { email, role } = req.body;
+  const otp = Math.floor(100000 + Math.random() * 900000).toString(); // 6-digit OTP
 
-  const otp = generateOTP();
+  otpStore[email] = { otp, role, expires: Date.now() + 5 * 60 * 1000 }; // expires in 5 min
 
-  let user = await User.findOne({ email });
-
-  if (!user) {
-    user = new User({ email, role, otp });
-  } else {
-    user.otp = otp;
-  }
-
-  await user.save();
-
-  await transporter.sendMail({
-    to: email,
-    subject: "KLH Lost & Found OTP",
-    text: `Your OTP is ${otp}`
-  });
-
-  res.status(200).json({ message: "OTP sent" });
+  console.log(`🔐 OTP for ${email} (${role}): ${otp}`);
+  res.status(200).json({ message: 'OTP sent successfully (console only for now)' });
 };
 
-export const verifyOTP = async (req, res) => {
+export const verifyOtp = (req, res) => {
   const { email, otp } = req.body;
+  const stored = otpStore[email];
 
-  const user = await User.findOne({ email });
-
-  if (!user || user.otp !== otp) {
-    return res.status(400).json({ message: "Invalid OTP" });
+  if (!stored) {
+    return res.status(400).json({ error: 'No OTP found. Please request a new one.' });
   }
 
-  user.isVerified = true;
-  user.otp = null;
-  await user.save();
+  if (stored.otp !== otp) {
+    return res.status(401).json({ error: 'Invalid OTP' });
+  }
 
-  const token = jwt.sign({ id: user._id, role: user.role }, process.env.JWT_SECRET, { expiresIn: '1d' });
+  if (Date.now() > stored.expires) {
+    return res.status(403).json({ error: 'OTP expired' });
+  }
 
-  res.status(200).json({ token, role: user.role });
+  // In production, you'd issue a real JWT here
+  return res.status(200).json({
+    message: 'OTP verified',
+    token: 'fake-jwt-token',
+    role: stored.role,
+  });
 };
